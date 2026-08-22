@@ -780,6 +780,30 @@ body.hand-delafield .ink{
   color:rgba(58,42,30,.82);text-shadow:0 1px 0 var(--highlight-color);
 }
 
+/* the net: a link that arrived in pieces is still a whole letter */
+#lostFix{margin-top:22px;text-align:left}
+#lostFix .lf-lead{
+  margin:0 0 8px;font-size:13px;line-height:1.55;color:rgba(58,42,30,.62);
+  text-shadow:none;
+}
+#lfIn{
+  display:block;width:100%;box-sizing:border-box;resize:vertical;
+  font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#3a2a1e;background:rgba(255,252,244,.72);
+  border:1px solid rgba(58,42,30,.22);border-radius:8px;padding:8px 9px;
+  -webkit-appearance:none;appearance:none;
+}
+#lfIn:focus{outline:none;border-color:rgba(58,42,30,.45)}
+#lfGo{
+  margin-top:8px;font:inherit;font-size:13px;cursor:pointer;
+  color:#3a2a1e;background:rgba(255,252,244,.72);
+  border:1px solid rgba(58,42,30,.28);border-radius:999px;padding:7px 16px;
+}
+#lfGo:active{background:rgba(255,252,244,.95)}
+#lostFix .lf-err{
+  margin:9px 0 0;font-size:12px;line-height:1.5;color:#8a3a2c;text-shadow:none;
+}
+
 #defs{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
 
 /* ============================================================ reduced motion */
@@ -1201,8 +1225,10 @@ body.hand-delafield .ink{
         <button type="button" id="rShare">share</button>
         <button type="button" id="rCopy">copy</button>
       </div>
-      <div class="r-hint">your whole letter lives inside this link — text it back,
-      and the pigeon makes the return flight. only someone with the link can read it.</div>
+      <div class="r-warn" id="rWarn" hidden></div>
+      <div class="r-hint">your whole letter lives inside this link — send it in a
+      message all by itself and the pigeon makes the return flight. only someone
+      with the link can read it.</div>
     </div>
   </div>
 </div>
@@ -1211,6 +1237,15 @@ body.hand-delafield .ink{
   <div class="inner">
     <div class="glyph">🕊</div>
     <p>this letter seems to have flown away — check the link</p>
+    <div id="lostFix">
+      <p class="lf-lead">did the link arrive in more than one piece? paste the
+      whole thing here, every piece of it — the letter is inside the text.</p>
+      <textarea id="lfIn" rows="3" spellcheck="false" autocapitalize="off"
+                autocorrect="off" placeholder="paste the link, or just the #r.… part"></textarea>
+      <button type="button" id="lfGo">open it</button>
+      <p class="lf-err" id="lfErr" hidden>that is not a whole letter — it looks
+      cut short. check that nothing after the last character was left behind.</p>
+    </div>
   </div>
 </div>
 
@@ -3116,7 +3151,47 @@ function flownAway(){
   D.skipBtn.classList.add("gone");
   D.againBtn.classList.remove("on");
   D.lost.classList.add("on");
+  /* only after a paste that did not work — the first landing here says
+     "check the link", not "you pasted it wrong" */
+  if(LF_TRY){ $("lfErr").hidden = false; LF_TRY = false; }
   STATE = "lost";
+}
+
+/* ---------------------------------------------------------- the recovery net
+   A fragment that arrives in pieces is not a lost letter — it is a letter that
+   needs reassembling. Hannah's first reply (2026-08-21) was delivered by
+   iMessage as two bubbles, the address in one and the payload in the next, so
+   every tap opened this page with an empty fragment and Miles read a working
+   app as a broken one. The letter was never gone; it was sitting in the thread
+   in plain sight. This takes whatever gets pasted, throws away everything that
+   is not fragment, and routes on what is left. */
+var LF_TRY = false;
+
+function initLostRecover(){
+  $("lfGo").addEventListener("click", lostRecover);
+  $("lfIn").addEventListener("input", function(){ $("lfErr").hidden = true; });
+}
+
+function lostRecover(){
+  /* strip the spaces, newlines and quote marks a message client may have
+     wrapped it in. A fragment is base64url plus "#", "." and ":" and "/" —
+     nothing legal is being discarded here. */
+  var raw = String($("lfIn").value || "").replace(/[^A-Za-z0-9._~#:\/-]/g, "");
+  var hash = raw.lastIndexOf("#");
+  if(hash >= 0) raw = raw.slice(hash + 1);
+  if(!raw){ $("lfIn").focus(); return; }
+
+  /* a payload pasted bare — its "#r." prefix left behind in the other bubble —
+     is still a reply. The only other shape route() knows is the published
+     "<10 chars>.<key>" form, and that one is unmistakable. */
+  if(raw.slice(0, 2) !== "r." && !/^[a-z0-9]{10}\./.test(raw)) raw = "r." + raw;
+
+  LF_TRY = true;
+  $("lfErr").hidden = true;
+  D.lost.classList.remove("on");
+  /* setting an identical hash fires no hashchange — route by hand for that one */
+  if(String(location.hash || "").replace(/^#/, "") === raw) route();
+  else location.hash = raw;
 }
 
 /* ==========================================================================
@@ -3208,6 +3283,7 @@ function boot(){
     skipToLetter();
   });
   initReply();
+  initLostRecover();
 
   if(mq){
     try{
@@ -3395,7 +3471,13 @@ function initReply(){
   $("rShare").addEventListener("click", function(){
     var link = $("rLink").value;
     if(link && navigator.share){
-      navigator.share({title: "A letter for you 🕊", url: link})["catch"](function(){});
+      /* URL and nothing else. A `title` alongside it makes iOS hand Messages
+         a caption AND a link, and the bubble stops being purely a URL — the
+         address unfurls into a preview card while the fragment trails behind
+         it as loose text, which is exactly how her first reply arrived on
+         2026-08-21 (in two bubbles, neither of them openable). One field,
+         one bubble, one tappable letter. */
+      navigator.share({url: link})["catch"](function(){});
     }
   });
   $("rCopy").addEventListener("click", function(){
@@ -3414,6 +3496,38 @@ function initReply(){
 var R_MONTHS = ["January","February","March","April","May","June","July",
                 "August","September","October","November","December"];
 
+/* The §3 wire stamp: YYYY-MM-DDTHH:MM:SSZ, UTC, no millis. toISOString gives
+   millis, which normFlight tolerates but the sender half never emits — both
+   ends of the wire write the same shape or neither does. */
+function utcStamp(d){
+  return d.toISOString().replace(/\.\d+Z$/, "Z");
+}
+
+/* Her return leg (Miles, 2026-08-22: "make it start from Austin again").
+
+   The reply used to carry no flight at all, so a letter the card promised
+   would "make the return flight" opened the instant he tapped it — the one
+   half of the round trip that never left the ground.
+
+   Nothing about the route needs to reach her phone. The letter she is
+   answering already carries the whole corridor in its own flight block, so
+   the way home is that corridor read backwards: she lifts off from wherever
+   his pigeon landed and flies to the door it left from, at the same speed.
+
+   Answering a v1 letter (no flight) still yields no flight, and her reply
+   opens the way v1 always did — SPEC §3 v2's law is that a missing corridor
+   costs her the map, never the words. */
+function returnFlight(now){
+  var f = CUR && CUR.flight;
+  if(!f || !f.from || !f.to) return null;
+  return {
+    sent_at: utcStamp(now),
+    from: {lon:f.to.lon,   lat:f.to.lat,   label:f.to.label},
+    to:   {lon:f.from.lon, lat:f.from.lat, label:f.from.label},
+    mph: f.mph
+  };
+}
+
 function replyMakeLink(){
   var name = $("rName").value.trim().slice(0, 60);
   var body = $("rBody").value.slice(0, 4000);
@@ -3429,9 +3543,40 @@ function replyMakeLink(){
       stamp: true, sign_off: ""
     }
   };
+  /* only when there is one — an absent key is shorter on the wire than a
+     null one, and every character here is a character that has to survive
+     a text message */
+  var fl = returnFlight(now);
+  if(fl){ letter.v = 2; letter.flight = fl; }
+
   $("rLink").value = location.origin + location.pathname +
     "#r." + b64uText(JSON.stringify(letter));
   $("rOut").hidden = false;
+  replyLinkWarn();
+}
+
+/* How long the link came out, and whether to say something about it.
+
+   Her whole letter rides inside the fragment, so the URL grows with the
+   prose — roughly 1.4 characters of link per character she writes. On
+   2026-08-21 Hannah's first real reply came out past 1300 characters, and
+   iMessage did not deliver it as one tappable thing: the address arrived in
+   one bubble and the letter's payload in another, so every tap landed on a
+   site with no letter in it and Miles read it as a broken app.
+
+   The link is not capped — a love letter is not the place to enforce a
+   budget — but she is told plainly when it is long, and told the one habit
+   that makes it survive: send it alone in its own message. #lostFix is the
+   net under all of this when it happens anyway. */
+var REPLY_LINK_LOUD = 900;
+function replyLinkWarn(){
+  var n = $("rLink").value.length;
+  var el = $("rWarn");
+  if(n <= REPLY_LINK_LOUD){ el.hidden = true; return; }
+  setText(el, "this link is long (" + n + " characters). send it in a message " +
+              "by itself — no words in the same bubble — or it can arrive in " +
+              "two pieces and neither half will open.");
+  el.hidden = false;
 }
 
 /* fonts change every measurement on this page — wait for them where we can */
